@@ -1,12 +1,12 @@
-# Build Docker images, push to Scaleway Container Registry, and redeploy Serverless Containers.
-# Runs after CI succeeds on a push to main (see workflow_run trigger below).
+# Test on PRs; on push to main (or manual run) build, push images, and redeploy Scaleway containers.
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
     branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 env:
   REGISTRY_HOST: rg.fr-par.scw.cloud
@@ -16,18 +16,47 @@ env:
   SCW_REGION: fr-par
 
 jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+
   deploy:
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push'
+    needs: [backend-test, frontend-test]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -47,7 +76,7 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_API }}:latest
-            ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_API }}:${{ github.event.workflow_run.head_sha }}
+            ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_API }}:${{ github.sha }}
 
       - name: Build and push web image
         uses: docker/build-push-action@v6
@@ -59,7 +88,7 @@ jobs:
             VITE_API_URL=${{ secrets.VITE_API_URL }}
           tags: |
             ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_WEB }}:latest
-            ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_WEB }}:${{ github.event.workflow_run.head_sha }}
+            ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_WEB }}:${{ github.sha }}
 
       - name: Install Scaleway CLI
         uses: scaleway/action-scw@v0

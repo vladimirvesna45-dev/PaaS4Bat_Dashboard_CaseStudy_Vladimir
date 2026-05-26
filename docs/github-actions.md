@@ -4,8 +4,7 @@
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| [CI](../.github/workflows/ci.yml) | Push/PR to `main` | Backend pytest + frontend build |
-| [Deploy](../.github/workflows/deploy.yml) | After CI succeeds on **push** to `main` | Build/push Docker images and redeploy Scaleway Serverless Containers |
+| [Deploy](../.github/workflows/deploy.yml) | Push to `main`, PR to `main` (tests only), or **Run workflow** | Tests; on push/manual: build/push images and redeploy Scaleway |
 
 ## One-time setup: GitHub repository secrets
 
@@ -48,9 +47,14 @@ Registry login uses:
 
 The **Access Key** is only required for the Scaleway CLI redeploy steps.
 
+## Manual deploy trigger
+
+GitHub → **Actions** → **Deploy** → **Run workflow** → branch `main`.  
+Use this after fixing secrets or if a push did not run the workflow.
+
 ## What deploy does
 
-1. Checks out the commit that passed CI on `main`.
+1. Checks out the commit on `main`.
 2. Builds `linux/amd64` images for `./backend` and `./frontend`.
 3. Pushes to `rg.fr-par.scw.cloud/namespace-paas4bat/` with tags `latest` and the commit SHA.
 4. Runs `scw container container redeploy` for the API and web containers so they pull the new `latest` images.
