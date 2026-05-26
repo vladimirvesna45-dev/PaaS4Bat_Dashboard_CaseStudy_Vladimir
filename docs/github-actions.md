@@ -57,7 +57,7 @@ Use this after fixing secrets or if a push did not run the workflow.
 1. Checks out the commit on `main`.
 2. Builds `linux/amd64` images for `./backend` and `./frontend`.
 3. Pushes to `rg.fr-par.scw.cloud/namespace-paas4bat/` with tags `latest` and the commit SHA.
-4. Runs `scw container container redeploy` for the API and web containers so they pull the new `latest` images.
+4. Updates each Serverless Container to the **commit SHA image tag** (not only `:latest`) and waits until status is `ready`. This avoids Scaleway keeping an old digest when only `redeploy` is called with a mutable tag.
 
 ## Security
 

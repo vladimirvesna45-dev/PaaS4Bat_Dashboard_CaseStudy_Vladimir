@@ -1,4 +1,4 @@
-# Test on PRs; on push to main (or manual run) build, push images, and redeploy Scaleway containers.
+# Test on PRs; on push to main (or manual run) build, push images, and deploy to Scaleway.
 name: Deploy
 
 on:
@@ -54,6 +54,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      API_IMAGE: ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_API }}:${{ github.sha }}
+      WEB_IMAGE: ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_WEB }}:${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,9 +77,10 @@ jobs:
           context: ./backend
           platforms: linux/amd64
           push: true
+          no-cache: true
           tags: |
             ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_API }}:latest
-            ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_API }}:${{ github.sha }}
+            ${{ env.API_IMAGE }}
 
       - name: Build and push web image
         uses: docker/build-push-action@v6
@@ -84,30 +88,74 @@ jobs:
           context: ./frontend
           platforms: linux/amd64
           push: true
+          no-cache: true
           build-args: |
             VITE_API_URL=${{ secrets.VITE_API_URL }}
           tags: |
             ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_WEB }}:latest
-            ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_WEB }}:${{ github.sha }}
+            ${{ env.WEB_IMAGE }}
 
-      - name: Install Scaleway CLI
-        uses: scaleway/action-scw@v0
-        with:
-          save-config: true
-          export-config: true
-          access-key: ${{ secrets.SCW_ACCESS_KEY }}
-          secret-key: ${{ secrets.SCW_SECRET_KEY }}
-          default-project-id: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
-          default-organization-id: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      - name: Update Scaleway containers to new images
+        env:
+          SCW_REGION: ${{ env.SCW_REGION }}
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+          SCW_CONTAINER_API_ID: ${{ secrets.SCW_CONTAINER_API_ID }}
+          SCW_CONTAINER_WEB_ID: ${{ secrets.SCW_CONTAINER_WEB_ID }}
+        run: |
+          set -euo pipefail
 
-      - name: Redeploy API container
-        run: >
-          scw container container redeploy
-          container-id=${{ secrets.SCW_CONTAINER_API_ID }}
-          region=${{ env.SCW_REGION }}
+          curl -sSL "https://github.com/scaleway/scaleway-cli/releases/download/v2.39.0/scaleway-cli_2.39.0_linux_amd64.tar.gz" | tar -xz -C /tmp
+          sudo mv /tmp/scw /usr/local/bin/scw
 
-      - name: Redeploy web container
-        run: >
-          scw container container redeploy
-          container-id=${{ secrets.SCW_CONTAINER_WEB_ID }}
-          region=${{ env.SCW_REGION }}
+          wait_ready() {
+            local id="$1" label="$2"
+            for attempt in $(seq 1 72); do
+              status=$(scw container container get "container-id=${id}" "region=${SCW_REGION:-fr-par}" -o json | jq -r .status)
+              echo "${label} status: ${status} (attempt ${attempt})"
+              case "${status}" in
+                ready) return 0 ;;
+                error)
+                  scw container container get "container-id=${id}" "region=${SCW_REGION:-fr-par}" -o json | jq -r .error_message
+                  return 1
+                  ;;
+              esac
+              sleep 5
+            done
+            echo "${label} deploy timed out after 6 minutes"
+            return 1
+          }
+
+          echo "Deploying API image: ${API_IMAGE}"
+          scw container container update \
+            "container-id=${SCW_CONTAINER_API_ID}" \
+            "region=${SCW_REGION:-fr-par}" \
+            "image=${API_IMAGE}"
+          wait_ready "${SCW_CONTAINER_API_ID}" "API"
+
+          echo "Deploying web image: ${WEB_IMAGE}"
+          scw container container update \
+            "container-id=${SCW_CONTAINER_WEB_ID}" \
+            "region=${SCW_REGION:-fr-par}" \
+            "image=${WEB_IMAGE}"
+          wait_ready "${SCW_CONTAINER_WEB_ID}" "Web"
+
+          echo "Scaleway deployment complete."
+
+      - name: Show deployed image digests
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+          SCW_CONTAINER_API_ID: ${{ secrets.SCW_CONTAINER_API_ID }}
+          SCW_CONTAINER_WEB_ID: ${{ secrets.SCW_CONTAINER_WEB_ID }}
+        run: |
+          curl -sSL "https://github.com/scaleway/scaleway-cli/releases/download/v2.39.0/scaleway-cli_2.39.0_linux_amd64.tar.gz" | tar -xz -C /tmp
+          sudo mv /tmp/scw /usr/local/bin/scw
+          echo "API container:"
+          scw container container get "container-id=${SCW_CONTAINER_API_ID}" "region=fr-par" -o json | jq '{status, image: .registry_image, error_message}'
+          echo "Web container:"
+          scw container container get "container-id=${SCW_CONTAINER_WEB_ID}" "region=fr-par" -o json | jq '{status, image: .registry_image, error_message}'
