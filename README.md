@@ -93,6 +93,12 @@ Sample files: `frontend/public/sample/sample_battery.csv`
 - Export CSV and PDF
 - Dark mode and demo login
 
+## CI/CD (GitHub Actions)
+
+On every push to `main`, after tests pass, the [Deploy workflow](.github/workflows/deploy.yml) builds Docker images, pushes them to Scaleway Container Registry, and redeploys your Serverless Containers.
+
+Configure [GitHub Actions secrets](docs/github-actions.md) once (`SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, project/organization IDs, container IDs, and `VITE_API_URL`).
+
 ## Scaleway deployment
 
 1. Create a **Container Registry** namespace and log in:

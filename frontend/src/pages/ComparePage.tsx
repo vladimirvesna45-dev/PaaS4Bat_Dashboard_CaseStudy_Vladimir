@@ -105,7 +105,7 @@ export function ComparePage() {
       <div>
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Battery Comparison</h2>
         <p className="mt-1 text-slate-600 dark:text-slate-400">
-          Compare degradation trajectories and key metrics side-by-side.
+          Compare degradation key metrics between two batteries side-by-side.
         </p>
       </div>
 

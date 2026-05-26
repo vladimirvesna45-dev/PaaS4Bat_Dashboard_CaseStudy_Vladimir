@@ -2,7 +2,7 @@ import { parseCsvFile } from '@/lib/csvParser'
 import { generateMockPrediction } from '@/lib/mockPredictor'
 import type { PredictionResponse } from '@/types/prediction'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? ''
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const REQUEST_TIMEOUT_MS = 1_500
 
 function isApiUnreachable(err: unknown): boolean {
